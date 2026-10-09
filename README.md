@@ -92,8 +92,26 @@ Para validar la concurrencia y la captura de métricas exigida en la rúbrica, s
 
 > **Nota sobre Rate Limits (capa gratuita):** debido a los límites estrictos de la API de Gemini en su capa gratuita (Rate Limit 429 - 15 RPM máx.), las solicitudes múltiples concurrentes se manejan con un ligero retraso de seguridad (delay de 2 a 3 segundos) entre ejecuciones. Esto garantiza el procesamiento completo de todas las tareas y la captura de la latencia, tokens y costo en LangSmith sin generar bloqueos.
 
-**Evidencia:**
-En el directorio `screenshots/` se encuentra el archivo `image_3e4c3a.jpg`, el cual documenta las 5 trazas exitosas registradas en el panel de LangSmith.
+## Para reproducir la prueba de carga:
+Con el servidor en ejecución, abre una nueva terminal con el entorno virtual activado y ejecuta:
+
+```powershell
+python test.py
+```
+ 
+## Evidencia de Observabilidad (LangSmith)
+
+Para validar la correcta integración de monitoreo activo, se realizó una prueba de carga lanzando **5 peticiones concurrentes** contra la API. A continuación se presentan las métricas solicitadas:
+
+### 1. Latencia p95
+En la siguiente captura se observa el tiempo de respuesta en el percentil 95 (P99/P95) durante el pico de peticiones concurrentes:
+
+![Latencia p95](screenshots/image2.png)
+
+### 2. Costo por Ejecución y Tokens
+Aquí se detalla el consumo de tokens de entrada/salida y el costo total asociado a las 5 ejecuciones asíncronas del agente:
+
+![Costo por Ejecución](screenshots/image1.png)
 
 ---
 
@@ -141,10 +159,12 @@ entrega 7/
 │   └── observability.py # Módulos de monitoreo y observabilidad
 │
 ├── screenshots/
-│   └── image_3e4c3a.jpg # Evidencia de métricas de LangSmith (Pre-entrega 7)
+│   ├── image2.png       # Evidencia de latencia p95 con 5 peticiones concurrentes
+│   └── image1.png       # Evidencia de costo y consumo de tokens
 │
 ├── .env                 # Credenciales y variables de entorno
 ├── run.py               # Script auxiliar de ejecución limpia
+├── test.py              # Script asíncrono para prueba de carga (5 peticiones)
 ├── requirements.txt     # Dependencias del proyecto
 └── README.md            # Documentación del sistema
 ```

@@ -13,7 +13,7 @@ services:
       - "8000:8000"
     environment:
       - REDIS_URL=redis://redis:6379
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
     depends_on:
       - redis
