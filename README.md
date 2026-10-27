@@ -15,7 +15,7 @@ curso_ia--entrega_7/
 │   └── observability.py         # Configuración de trazas e instrumentación de LangSmith
 ├── screenshots/
 │   ├── trazas.png               # Evidencia del árbol de nodos y ejecuciones del agente
-│   └── metricas_p95_costo.png   # Latencia P95, costos y cinco ejecuciones en paralelo
+│   └── metricas_langsmith.png   # Latencia P95, costos y cinco ejecuciones en paralelo
 ├── .env.example                 # Plantilla de variables de entorno
 ├── .gitignore                   # Exclusión de credenciales, entornos virtuales y cachés
 ├── Dockerfile                   # Imagen Docker de la API
@@ -39,9 +39,13 @@ Se utiliza un `ConnectionPool` reutilizable junto con la inyección de dependenc
 
 ### 3. Human-in-the-Loop (HITL)
 
-Se utiliza `interrupt()` dentro del grafo de LangGraph para pausar las tareas que requieren aprobación humana.
+El flujo de aprobación humana depende del campo booleano `requires_approval`, enviado en el cuerpo de `POST /tasks` y propagado por el worker al estado inicial de LangGraph.
 
-La ejecución puede reanudarse mediante `Command(resume=...)`, conservando el `thread_id` correspondiente para recuperar el estado de la tarea.
+- Si `requires_approval` es `true`, el grafo pasa del nodo de investigación a `human_approval`, donde `interrupt()` pausa la ejecución hasta recibir una decisión externa.
+- Si `requires_approval` es `false`, el grafo omite el nodo de aprobación y continúa directamente al nodo de formateo.
+- Cuando una tarea está pausada, puede reanudarse mediante `Command(resume=...)`, conservando el `thread_id` asociado al trabajo para recuperar su checkpoint.
+
+En esta versión, el valor de `requires_approval` lo define quien envía la solicitud; el sistema no determina automáticamente si una tarea es crítica.
 
 ### 4. Resiliencia y tolerancia a fallos
 
@@ -72,7 +76,6 @@ venv\Scripts\Activate.ps1
 Si utilizás CMD:
 
 ```bat
-python -m venv venv
 venv\Scripts\activate.bat
 ```
 
@@ -228,7 +231,7 @@ La transición entre estados depende de la lógica implementada en el worker y d
 
 Podés probar el proceso completo desde Swagger.
 
-### Paso 1. Crear una tarea
+### Paso 1. Crear una tarea que requiera aprobación
 
 Realizá una petición:
 
@@ -240,13 +243,16 @@ Cuerpo JSON:
 
 ```json
 {
-  "prompt": "Analizar caso de estudio"
+  "prompt": "Analizar caso de estudio",
+  "requires_approval": true
 }
 ```
 
-La API debe devolver una respuesta `202 Accepted` con un identificador `job_id`.
+La API debe devolver una respuesta `202 Accepted` con un identificador `job_id`. La tarea avanzará hasta `human_approval` y quedará pausada hasta recibir una decisión externa.
 
-Ejemplo ilustrativo:
+Para crear una tarea que **no** requiera aprobación, enviá `"requires_approval": false`. En ese caso, el grafo omitirá el nodo `human_approval` y continuará directamente al nodo de formateo.
+
+Ejemplo ilustrativo de respuesta:
 
 ```json
 {
@@ -265,7 +271,7 @@ Utilizá el identificador obtenido:
 GET /tasks/{job_id}
 ```
 
-Esperá hasta que el estado sea `PAUSED_FOR_APPROVAL`.
+Para la tarea que requiere aprobación, esperá hasta que el estado sea `PAUSED_FOR_APPROVAL`.
 
 ### Paso 3. Enviar la aprobación
 
@@ -275,7 +281,7 @@ Realizá una petición:
 POST /tasks/{job_id}/approve
 ```
 
-Cuerpo JSON:
+Cuerpo JSON para aprobar:
 
 ```json
 {
@@ -283,7 +289,15 @@ Cuerpo JSON:
 }
 ```
 
-La aprobación debe reanudar el grafo utilizando el estado persistido y el `thread_id` correspondiente.
+Para rechazar la tarea, enviá:
+
+```json
+{
+  "approved": false
+}
+```
+
+La decisión debe reanudar el grafo utilizando el checkpoint persistido y el `thread_id` correspondiente.
 
 ### Paso 4. Confirmar la finalización
 

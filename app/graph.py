@@ -8,7 +8,6 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
 
 load_dotenv()
-
 logger = logging.getLogger(__name__)
 
 
@@ -17,9 +16,7 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-GEMINI_TIMEOUT_SECONDS = float(
-    os.getenv("GEMINI_TIMEOUT_SECONDS", "25")
-)
+GEMINI_TIMEOUT_SECONDS = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "25"))
 
 llm = ChatGoogleGenerativeAI(
     model=GEMINI_MODEL,
@@ -38,6 +35,7 @@ class AgentState(TypedDict, total=False):
     response: str
     status: str
     approved: bool
+    requires_approval: bool
     research_fallback_used: bool
     formatting_fallback_used: bool
 
@@ -47,21 +45,17 @@ class AgentState(TypedDict, total=False):
 # --------------------------------------------------
 
 def content_to_text(content: Any) -> str:
-    """Convierte el contenido de Gemini en texto plano."""
-
+    """Convierte el contenido devuelto por Gemini en texto plano."""
     if isinstance(content, str):
         return content.strip()
 
     if isinstance(content, list):
         parts = []
-
         for item in content:
             if isinstance(item, dict):
                 text = item.get("text")
-
                 if isinstance(text, str):
                     parts.append(text)
-
         if parts:
             return "\n".join(parts).strip()
 
@@ -72,23 +66,20 @@ def content_to_text(content: Any) -> str:
 # NODO 1: INVESTIGACIÓN
 # --------------------------------------------------
 
-def research_node(state: AgentState) -> dict:
+async def research_node(state: AgentState) -> dict:
+    """Investiga el tema usando la llamada asíncrona al modelo."""
     prompt = str((state.get("messages") or [""])[-1]).strip()
-
     logger.info("[GRAPH] Iniciando investigación con Gemini")
 
     try:
-        result = llm.invoke(
+        result = await llm.ainvoke(
             f"Resume en dos oraciones breves qué es: {prompt}"
         )
-
         response = content_to_text(result.content)
-
         if not response:
             raise ValueError("Gemini devolvió una respuesta vacía")
 
         logger.info("[GRAPH] Investigación completada")
-
         return {
             "response": response,
             "status": "investigando",
@@ -96,23 +87,29 @@ def research_node(state: AgentState) -> dict:
         }
 
     except Exception:
-        logger.exception(
-            "[GRAPH] Gemini falló durante la investigación"
-        )
-
-        # Este texto es una contingencia, no una respuesta
-        # generada por la inteligencia artificial.
+        logger.exception("[GRAPH] Gemini falló durante la investigación")
+        # Se identifica explícitamente como contingencia, no como respuesta de IA.
         fallback_response = (
             "No se pudo completar la investigación con Gemini. "
             "Se requiere revisar el resultado manualmente.\n\n"
             f"Tema solicitado: {prompt}"
         )
-
         return {
             "response": fallback_response,
             "status": "fallback_investigacion",
             "research_fallback_used": True,
         }
+
+
+# --------------------------------------------------
+# ENRUTAMIENTO CONDICIONAL SEGÚN requires_approval
+# --------------------------------------------------
+
+def route_after_research(state: AgentState) -> str:
+    """Envía a aprobación humana solo si la tarea lo solicita."""
+    if state.get("requires_approval", False) is True:
+        return "human_approval"
+    return "formatter"
 
 
 # --------------------------------------------------
@@ -122,27 +119,29 @@ def research_node(state: AgentState) -> dict:
 def human_approval(state: AgentState) -> dict:
     logger.info("[GRAPH] Esperando decisión humana")
 
-    # LangGraph pausa la ejecución y guarda el checkpoint.
-    decision = interrupt({
-        "type": "human_approval",
-        "question": "¿Aprobás continuar con esta tarea?",
-        "draft": state.get("response", ""),
-        "research_fallback_used": state.get(
-            "research_fallback_used", False
-        ),
-    })
+    # interrupt() pausa el grafo y permite persistir el checkpoint.
+    decision = interrupt(
+        {
+            "type": "human_approval",
+            "question": "¿Aprobás continuar con esta tarea?",
+            "draft": state.get("response", ""),
+            "research_fallback_used": state.get(
+                "research_fallback_used", False
+            ),
+        }
+    )
 
-    # Solo se acepta una aprobación explícita con valor booleano.
+    # El worker reanuda con Command(resume={"approved": True/False}).
     approved = (
         isinstance(decision, dict)
-        and decision.get("approved") is True
+        and isinstance(decision.get("approved"), bool)
+        and decision["approved"] is True
     )
 
     logger.info(
         "[GRAPH] Decisión humana: %s",
         "APROBADA" if approved else "RECHAZADA",
     )
-
     return {
         "approved": approved,
         "status": "APPROVED" if approved else "REJECTED",
@@ -153,21 +152,18 @@ def human_approval(state: AgentState) -> dict:
 # NODO 3: FORMATEO
 # --------------------------------------------------
 
-def formatting_node(state: AgentState) -> dict:
+async def formatting_node(state: AgentState) -> dict:
+    """Da formato a la respuesta usando una llamada asíncrona a Gemini."""
     original_response = state.get("response", "")
-
     logger.info("[GRAPH] Formateando respuesta")
 
     try:
-        result = llm.invoke(
-            "Dale formato profesional, claro y ordenado "
-            "al siguiente texto. Conservá sus datos y no "
-            "inventes información:\n\n"
+        result = await llm.ainvoke(
+            "Dale formato profesional, claro y ordenado al siguiente texto. "
+            "Conservá sus datos y no inventes información:\n\n"
             f"{original_response}"
         )
-
         response = content_to_text(result.content)
-
         if not response:
             raise ValueError("Gemini devolvió un texto vacío")
 
@@ -178,12 +174,8 @@ def formatting_node(state: AgentState) -> dict:
         }
 
     except Exception:
-        logger.exception(
-            "[GRAPH] Falló el formateo con Gemini"
-        )
-
-        # Conservamos el borrador original sin fingir que
-        # el formateo con IA se completó correctamente.
+        logger.exception("[GRAPH] Falló el formateo con Gemini")
+        # Si falla el segundo llamado, conservamos el borrador original.
         return {
             "response": original_response,
             "status": "completado_con_fallback",
@@ -197,9 +189,6 @@ def formatting_node(state: AgentState) -> dict:
 
 def rejected_node(state: AgentState) -> dict:
     logger.info("[GRAPH] La persona rechazó la tarea")
-
-    # Conserva el borrador para que pueda consultarse,
-    # pero no ejecuta el nodo de formateo.
     return {
         "status": "REJECTED",
         "approved": False,
@@ -213,7 +202,6 @@ def rejected_node(state: AgentState) -> dict:
 def route_after_approval(state: AgentState) -> str:
     if state.get("approved") is True:
         return "formatter"
-
     return "rejected"
 
 
@@ -231,7 +219,15 @@ def get_compiled_graph(checkpointer):
 
     workflow.set_entry_point("research")
 
-    workflow.add_edge("research", "human_approval")
+    # Esta rama evita interrumpir tareas que no requieren aprobación.
+    workflow.add_conditional_edges(
+        "research",
+        route_after_research,
+        {
+            "human_approval": "human_approval",
+            "formatter": "formatter",
+        },
+    )
 
     workflow.add_conditional_edges(
         "human_approval",
@@ -245,8 +241,5 @@ def get_compiled_graph(checkpointer):
     workflow.add_edge("formatter", END)
     workflow.add_edge("rejected", END)
 
-    # La pausa se produce dentro de human_approval mediante
-    # interrupt(). No agregues interrupt_before aquí.
-    return workflow.compile(
-        checkpointer=checkpointer
-    )
+    # La pausa está dentro de human_approval mediante interrupt().
+    return workflow.compile(checkpointer=checkpointer)
