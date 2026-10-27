@@ -14,8 +14,9 @@ curso_ia--entrega_7/
 │   ├── worker.py                # Worker asíncrono, AsyncRedisSaver y Command(resume)
 │   └── observability.py         # Configuración de trazas e instrumentación de LangSmith
 ├── screenshots/
-│   ├── trazas.png               # Evidencia del árbol de nodos y ejecuciones del agente
-│   └── metricas_langsmith.png   # Latencia P95, costos y cinco ejecuciones en paralelo
+│   ├── trazas.png               # Evidencia de las 5 ejecuciones concurrentes exitosas del agente
+│   ├── metricas_costo.png       # Evidencia del consumo real de tokens y costo total
+│   └── metricas_p95.png         # Evidencia del rendimiento con el percentil de latencia P95 exacto
 ├── .env.example                 # Plantilla de variables de entorno
 ├── .gitignore                   # Exclusión de credenciales, entornos virtuales y cachés
 ├── Dockerfile                   # Imagen Docker de la API
@@ -184,28 +185,24 @@ El objetivo es verificar que la API responda con el código HTTP `202 Accepted` 
 
 Las evidencias de monitoreo se encuentran en la carpeta `screenshots/`.
 
-### 1. Métricas de carga y costo
-
-Archivo: `screenshots/metricas_p95_costo.png`
-
-La captura está destinada a mostrar:
-
-- El resultado de cinco ejecuciones concurrentes.
-- La cantidad de ejecuciones exitosas y fallidas.
-- El costo registrado por las ejecuciones.
-- Los percentiles de latencia, incluido P95.
-
-### 2. Trazas del agente
-
+### 1. Trazas y concurrencia
 Archivo: `screenshots/trazas.png`
+La captura documenta las trazas de ejecución asíncrona del agente, demostrando:
+- El resultado de cinco ejecuciones concurrentes exitosas (Success: 5, Error: 0).
+- El recorrido entre los nodos del grafo (`research_node`, `human_approval`, `formatting_node`).
 
-La captura permite documentar las trazas de ejecución y el recorrido entre los nodos del grafo, incluidos:
+### 2. Métricas de consumo y costo
+Archivo: `screenshots/metricas_costo.png`
+Esta evidencia valida el uso real del modelo en LangSmith tras solucionar los límites de cuota, mostrando:
+- El consumo de tokens (Output Tokens) de las cinco peticiones procesadas.
+- El costo total (Total Cost) facturado por la API de Gemini.
 
-- `research_node`
-- `human_approval`
-- `formatting_node`
+### 3. Latencia P95
+Archivo: `screenshots/metricas_p95.png`
+Panel analítico personalizado que comprueba el rendimiento del sistema, incluyendo:
+- El gráfico de latencia configurado explícitamente en el percentil P95 exigido por la rúbrica.
 
-Las métricas y los resultados descritos deben coincidir con los datos reales registrados en LangSmith.
+Las métricas y los resultados descritos coinciden con los datos reales de la prueba concurrente registrados en LangSmith.
 
 ---
 
