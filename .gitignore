@@ -1,21 +1,5 @@
-# Entornos virtuales
 venv/
-env/
-.venv/
-
-# Variables de entorno y secretos
-.env
-.env.*
-
-# Caché de Python
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.Python
-
-# VS Code
-.vscode/
-
-# Logs
-*.log
+.env
+.pytest_cache/
